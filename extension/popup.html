@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 300px; margin: 12px; }
+  #status { margin: 8px 0 12px; }
+  button { display: block; width: 100%; margin-top: 6px; padding: 6px; }
+  small { color: #666; }
+  .ok { color: #1a7f37; } .bad { color: #cf222e; }
+</style>
+<strong>Argo Submit</strong>
+<div id="bulk" hidden>
+  <div id="bulk-status"></div>
+  <button id="bulk-toggle"></button>
+  <hr>
+</div>
+<div id="status">Loading…</div>
+<button id="copy" disabled>Copy env (for <code>eval "$(pbpaste)"</code>)</button>
+<button id="write" disabled>Write to ~/.cache/argo-sso/env</button>
+<button id="open">Open Argo UI (log in)</button>
+<button id="options">Settings</button>
+<div id="msg"><small></small></div>
+<script type="module" src="popup-bulk.js"></script>
+<script type="module" src="popup.js"></script>

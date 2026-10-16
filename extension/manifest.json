@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Argo Submit",
+  "version": "0.1.0",
+  "description": "Hands your Argo Workflows SSO session token to the argo CLI.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1zIXk6IhIstSbLBQaEdvajbmU+ybkzO+GtgBaR/ay+Y/yqK98Fuvf/My1rOYrh2fesytd2jIB/rMUwL+aatXJ2csWypovtnFpNFja+IVHwWHUNehbutxjW5zBj49dgFIQUpZPK+iK4KPF01dGHU3Msmb3LTeFrj3uOq7awQGLyaSIl3Vv8TN1k7FdoY9ChqVAnsOvklogk1XOtisgoCY0tBEdNu0WnJCcqoqPTcOPMB5QA/J6lkKqfePf48vto2SBm5L0J9pyLfBUEta+tQZE9gWfPlEo5+5h4ji8JUG3HG3g8hsdauqKzd3qUFn3nz3wTx/00DBwRqXfVWDeACrzQIDAQAB",
+  "minimum_chrome_version": "110",
+  "permissions": ["cookies", "storage", "nativeMessaging", "scripting", "activeTab"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Argo Submit", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}
