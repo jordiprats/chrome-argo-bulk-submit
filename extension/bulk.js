@@ -227,7 +227,7 @@
     });
     const onFailure = h('select', {},
       h('option', { value: 'stop' }, 'stop the batch'),
-      h('option', { value: 'ask' }, 'ask what to do'),
+      h('option', { value: 'ask', selected: true }, 'ask what to do'),
       h('option', { value: 'continue' }, 'continue with the next line'));
     const validateBtn = h('button', { onclick: () => start(true) }, 'Validate');
     const runBtn = h('button', { class: 'primary', onclick: () => start(false) }, 'Run');
