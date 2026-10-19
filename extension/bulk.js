@@ -105,15 +105,23 @@
   }
 
   // Mutates item.state/name/message and calls render() after each change.
-  async function runBatch(items, { ns, dryRun, onFailure, signal, render }) {
+  // resume: true skips items already in a terminal state and re-runs skipped ones.
+  // onFailureAsk(item): called when onFailure === 'ask' and a workflow fails; must return
+  //   a Promise that resolves to 'continue' or 'stop'. May reject with AbortError on abort.
+  async function runBatch(items, { ns, dryRun, onFailure, onFailureAsk, signal, render, resume = false }) {
     const set = (item, state, message = '', name = item.name) => {
       Object.assign(item, { state, message, name });
       render();
     };
-    items.forEach(i => set(i, 'pending', '', null));
+    if (resume) {
+      items.forEach(i => { if (i.state === 'skipped') set(i, 'pending', '', null); });
+    } else {
+      items.forEach(i => set(i, 'pending', '', null));
+    }
     let halted = false;
 
     for (const item of items) {
+      if (resume && item.state !== 'pending') continue;
       if (halted || signal.aborted) { set(item, 'skipped', halted ? 'earlier line failed' : 'stopped'); continue; }
       let result;
       try {
@@ -134,8 +142,14 @@
         result = { state: 'failed', message: e.message };
       }
       set(item, result.state, result.message);
-      // Validation always checks every line; a real run honours the on-failure flag.
-      if (result.state === 'failed' && !dryRun && onFailure === 'stop') halted = true;
+      if (result.state === 'failed' && !dryRun) {
+        if (onFailure === 'stop') {
+          halted = true;
+        } else if (onFailure === 'ask' && onFailureAsk) {
+          const decision = await onFailureAsk(item);
+          if (decision === 'stop') halted = true;
+        }
+      }
     }
   }
 
@@ -213,10 +227,12 @@
     });
     const onFailure = h('select', {},
       h('option', { value: 'stop' }, 'stop the batch'),
+      h('option', { value: 'ask' }, 'ask what to do'),
       h('option', { value: 'continue' }, 'continue with the next line'));
     const validateBtn = h('button', { onclick: () => start(true) }, 'Validate');
     const runBtn = h('button', { class: 'primary', onclick: () => start(false) }, 'Run');
-    const stopBtn = h('button', { class: 'danger', onclick: () => abort?.abort() }, 'Stop');
+    const continueBtn = h('button', { class: 'primary', onclick: onContinue }, 'Continue');
+    const stopBtn = h('button', { class: 'danger', onclick: onStop }, 'Stop');
     const closeBtn = h('button', { onclick: close }, 'Close');
     const list = h('div');
     const summary = h('div', { class: 'muted' });
@@ -233,7 +249,7 @@
         h('div', { class: 'controls' },
           h('label', {}, 'On failure: ', onFailure),
           h('span', { class: 'spacer' }),
-          validateBtn, runBtn, stopBtn, closeBtn),
+          validateBtn, runBtn, continueBtn, stopBtn, closeBtn),
         summary,
         list));
     root.append(h('style', {}, CSS), h('div', { class: 'backdrop' }, dialog));
@@ -242,6 +258,18 @@
     textarea.focus();
 
     const running = () => abort != null;
+    let askResolve = null;
+    const asking = () => askResolve != null;
+    const hasSkipped = () => !running() && items.some(i => i.state === 'skipped');
+
+    function onContinue() {
+      if (askResolve) { askResolve('continue'); return; }
+      if (hasSkipped()) start(false, true);
+    }
+    function onStop() {
+      if (askResolve) { askResolve('stop'); return; }
+      abort?.abort();
+    }
 
     function pickerGroup(label, key) {
       const set = selected[key];
@@ -291,11 +319,14 @@
       const ns = currentNamespace();
       nsLabel.textContent = ns || '(none selected)';
       const bad = items.filter(i => i.errors.length).length;
-      const canStart = !running() && items.length > 0 && bad === 0 && !!ns;
+      const canStart = !running() && !hasSkipped() && items.length > 0 && bad === 0 && !!ns;
       validateBtn.disabled = runBtn.disabled = !canStart;
+      validateBtn.hidden = runBtn.hidden = running() || hasSkipped();
+      continueBtn.hidden = !asking() && !hasSkipped();
       stopBtn.hidden = !running();
-      textarea.disabled = onFailure.disabled = running();
-      pickers.querySelectorAll('input').forEach(i => { i.disabled = running(); });
+      stopBtn.textContent = asking() ? 'Stop Batch' : 'Stop';
+      textarea.disabled = onFailure.disabled = running() || hasSkipped();
+      pickers.querySelectorAll('input').forEach(i => { i.disabled = running() || hasSkipped(); });
 
       list.replaceChildren();
       const showTarget = items.some(i => i.region || i.cluster);
@@ -321,26 +352,39 @@
       summary.textContent = !ns && items.length ? 'Select a namespace in the Argo UI first.'
         : missing.length ? `Tick at least one ${missing.join(' and one ')} above: the lines use ${missing.map(v => '$' + v).join(' and ')}.`
         : bad ? `${bad} line(s) have errors - fix them to continue.`
+        : asking() ? `${parts.join(', ')} — continue with the next line or stop the batch?`
+        : hasSkipped() ? `${parts.join(', ')} — click Continue to run the remaining items.`
         : parts.join(', ');
     }
 
     function reparse() {
-      if (running()) return;
+      if (running() || hasSkipped()) return;
       items = expandBulk(textarea.value, { regions: picked('regions'), clusters: picked('clusters') });
       render();
     }
 
-    async function start(dryRun) {
+    async function start(dryRun, resume = false) {
       const ns = currentNamespace();
       if (!ns) return render();
-      if (!dryRun && !confirm(`Submit ${items.length} workflow(s) one after another in namespace "${ns}"?`)) return;
+      const count = resume ? items.filter(i => i.state === 'skipped').length : items.length;
+      if (!dryRun && !resume && !confirm(`Submit ${count} workflow(s) one after another in namespace "${ns}"?`)) return;
       abort = new AbortController();
       window.addEventListener('beforeunload', warnUnload);
       render();
       try {
-        await runBatch(items, { ns, dryRun, onFailure: onFailure.value, signal: abort.signal, render });
+        await runBatch(items, {
+          ns, dryRun, onFailure: onFailure.value, signal: abort.signal, render, resume,
+          onFailureAsk: onFailure.value === 'ask' ? () => new Promise((resolve, reject) => {
+            const onAbort = () => { askResolve = null; reject(new DOMException('aborted', 'AbortError')); };
+            if (abort.signal.aborted) return onAbort();
+            abort.signal.addEventListener('abort', onAbort, { once: true });
+            askResolve = val => { abort.signal.removeEventListener('abort', onAbort); askResolve = null; resolve(val); };
+            render();
+          }) : null,
+        });
       } finally {
         abort = null;
+        askResolve = null;
         window.removeEventListener('beforeunload', warnUnload);
         render();
       }
@@ -349,7 +393,7 @@
     function close() {
       if (running()) {
         if (!confirm('A batch is still running. Stop watching it and close? (Workflows already submitted keep running.)')) return;
-        abort.abort();
+        abort.abort(); // also rejects any pending ask promise via its abort listener
       }
       host.remove();
       modal = null;
